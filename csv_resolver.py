@@ -517,7 +517,7 @@ if __name__ == "__main__":
 
     p = argparse.ArgumentParser(description="Detect/remove redundant FMC rules from CSV/TSV export.")
     p.add_argument("input_csv", help="Path to your exported rules file (TSV/CSV).")
-    p.add_argument("--output", default="resolved_rules.tsv", help="Output file path.")
+    p.add_argument("--output", default="resolved_rules.csv", help="Output file path.")
     p.add_argument("--log-level", default="INFO", help="INFO/DEBUG/WARNING/ERROR")
     args = p.parse_args()
 
