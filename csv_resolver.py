@@ -419,10 +419,10 @@ class AnomalyResolver:
         )
 
         new_rules_list: List[Rule] = list(old_rules_list)
-        removed = set()
+        removed_ids = set()
 
         for a, b in itertools.combinations(list(new_rules_list), 2):
-            if a in removed or b in removed:
+            if id(a) in removed_ids or id(b) in removed_ids:
                 continue
             if a.disjoint(b):
                 continue
@@ -430,12 +430,12 @@ class AnomalyResolver:
             # remove the smaller redundant one (subset + same action)
             if a.issubset(b) and a.actions == b.actions:
                 self.resolver_logger.info("Redundant rule (removed): %s  ⊆  %s", a.name, b.name)
-                removed.add(a)
+                removed_ids.add(id(a))
             elif b.issubset(a) and a.actions == b.actions:
                 self.resolver_logger.info("Redundant rule (removed): %s  ⊆  %s", b.name, a.name)
-                removed.add(b)
+                removed_ids.add(id(b))
 
-        new_rules_list = [r for r in new_rules_list if r not in removed]
+        new_rules_list = [r for r in new_rules_list if id(r) not in removed_ids]
 
         self.resolver_logger.info(
             "New rules list:\n\t" + "\n\t".join(map(str, new_rules_list))
