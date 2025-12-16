@@ -382,10 +382,19 @@ class AnomalyResolver:
 
         self.resolver_logger.info("Start Anomaly Resolver (CSV-adapted)")
 
+    def _fmt_rule(self, rule: Rule) -> str:
+        """Compact, log-friendly rendering of a rule using translated columns when present."""
+        src = rule.raw.get("Source Networks_translated") or rule.raw.get("Source Networks") or "*"
+        dst = rule.raw.get("Destination Networks_translated") or rule.raw.get("Destination Networks") or "*"
+        sp = rule.raw.get("Source Ports_translated") or rule.raw.get("Source Ports") or "*"
+        dp = rule.raw.get("Destination Ports_translated") or rule.raw.get("Destination Ports") or "*"
+        zones = (rule.raw.get("Source Zones") or "*", rule.raw.get("Destination Zones") or "*")
+        apps = rule.raw.get("Application filters") or ""
+        name = rule.name or "<unnamed>"
+        return f"{name}: <SZ:{zones[0]} DZ:{zones[1]} SRC:{src} SP:{sp} DST:{dst} DP:{dp} APP:{apps} ACT:{rule.actions}>"
+
     def detect_anomalies(self, rules_list: List[Rule]):
-        self.resolver_logger.info(
-            "Perform Detection\nRules list:\n\t" + "\n\t".join(map(str, rules_list))
-        )
+        self.resolver_logger.info("Perform Detection (pairwise anomalies only)")
 
         for rule_0, rule_1 in itertools.combinations(rules_list, 2):
             if rule_0.disjoint(rule_1):
@@ -394,17 +403,17 @@ class AnomalyResolver:
             if rule_0.issubset(rule_1) or rule_1.issubset(rule_0):
                 if rule_0.actions == rule_1.actions:
                     self.resolver_logger.info(
-                        "Redundancy Anomaly\n\t%s\n\t%s", str(rule_0), str(rule_1)
+                        "Redundancy Anomaly\n\t%s\n\t%s", self._fmt_rule(rule_0), self._fmt_rule(rule_1)
                     )
                 else:
                     self.resolver_logger.info(
-                        "Shadowing Anomaly\n\t%s\n\t%s", str(rule_0), str(rule_1)
+                        "Shadowing Anomaly\n\t%s\n\t%s", self._fmt_rule(rule_0), self._fmt_rule(rule_1)
                     )
                 continue
 
             if (not rule_0.disjoint(rule_1)) and (not rule_0.issubset(rule_1)) and (not rule_1.issubset(rule_0)) and (rule_0.actions != rule_1.actions):
                 self.resolver_logger.info(
-                    "Correlation Anomaly\n\t%s\n\t%s", str(rule_0), str(rule_1)
+                    "Correlation Anomaly\n\t%s\n\t%s", self._fmt_rule(rule_0), self._fmt_rule(rule_1)
                 )
                 continue
 
