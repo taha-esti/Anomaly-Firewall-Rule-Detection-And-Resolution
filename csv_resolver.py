@@ -47,6 +47,10 @@ def parse_ip_tokens(tokens: List[str]) -> Tuple[bool, List[IPNet], List[str]]:
     - CIDRs become networks
     - non-IP tokens (like "any", "NetGroup_X") are kept as strings
     """
+    # In FMC exports, an empty cell typically means "ANY".
+    if not tokens:
+        return True, [], []
+
     is_any = False
     nets: List[IPNet] = []
     others: List[str] = []
@@ -81,6 +85,10 @@ def parse_port_tokens(tokens: List[str]) -> Tuple[bool, List[PortInterval], List
       - named groups like "scom_ports"
       - "any"
     """
+    # In FMC exports, an empty cell typically means "ANY".
+    if not tokens:
+        return True, [], []
+
     is_any = False
     intervals: List[PortInterval] = []
     others: List[str] = []
@@ -161,12 +169,14 @@ class Rule:
 
     @staticmethod
     def _zones_subset(a: List[str], b: List[str]) -> bool:
+        # Empty list means ANY.
+        # ANY is only a subset of ANY; ANY is not a subset of a specific set of zones.
         if not a:
-            return True  # ANY is subset of anything? In policy logic: ANY is broader. Treat as not subset unless b is ANY too.
+            return not b
+        # If b is ANY, it covers everything.
         if not b:
-            return False  # b is ANY => b covers all; actually that means a ⊆ b is True. Wait carefully:
-        # If b empty => ANY => it covers everything, so a ⊆ b is True.
-        return set(a).issubset(set(b)) if b else True
+            return True
+        return set(a).issubset(set(b))
 
     @staticmethod
     def _apps_overlap(a: List[str], b: List[str]) -> bool:
@@ -384,10 +394,20 @@ class AnomalyResolver:
 
     def _fmt_rule(self, rule: Rule) -> str:
         """Compact, log-friendly rendering of a rule using translated columns when present."""
-        src = rule.raw.get("Source Networks_translated") or rule.raw.get("Source Networks") or "*"
-        dst = rule.raw.get("Destination Networks_translated") or rule.raw.get("Destination Networks") or "*"
-        sp = rule.raw.get("Source Ports_translated") or rule.raw.get("Source Ports") or "*"
-        dp = rule.raw.get("Destination Ports_translated") or rule.raw.get("Destination Ports") or "*"
+        def _cell(*keys: str) -> str:
+            for k in keys:
+                v = rule.raw.get(k)
+                if v is None:
+                    continue
+                s = str(v).strip()
+                if s:
+                    return s
+            return "*"
+
+        src = _cell("Source Networks_translated", "Source Networks")
+        dst = _cell("Destination Networks_translated", "Destination Networks")
+        sp = _cell("Source Ports_translated", "Source Ports")
+        dp = _cell("Destination Ports_translated", "Destination Ports")
         zones = (rule.raw.get("Source Zones") or "*", rule.raw.get("Destination Zones") or "*")
         apps = rule.raw.get("Application filters") or ""
         name = rule.name or "<unnamed>"
@@ -526,8 +546,19 @@ if __name__ == "__main__":
 
     p = argparse.ArgumentParser(description="Detect/remove redundant FMC rules from CSV/TSV export.")
     p.add_argument("input_csv", help="Path to your exported rules file (TSV/CSV).")
-    p.add_argument("--output", default="resolved_rules.csv", help="Output file path.")
     p.add_argument("--log-level", default="INFO", help="INFO/DEBUG/WARNING/ERROR")
+    mode = p.add_mutually_exclusive_group()
+    mode.add_argument(
+        "--detect-only",
+        action="store_true",
+        help="Only print detected anomalies (no output file, no changes).",
+    )
+    mode.add_argument(
+        "--resolve",
+        action="store_true",
+        help="Remove redundant rules and write an output file.",
+    )
+    p.add_argument("--output", default="resolved_rules.csv", help="Output file path (used with --resolve).")
     args = p.parse_args()
 
     rules, headers, delim = load_rules_from_csv(args.input_csv)
@@ -538,7 +569,7 @@ if __name__ == "__main__":
     enabled_rules = [r for r in rules if r.enabled is not False]
 
     resolver.detect_anomalies(enabled_rules)
-    resolved = resolver.resolve_anomalies(enabled_rules)
-
-    write_rules_to_csv(args.output, resolved, headers, delim)
-    print(f"Saved resolved rules to: {args.output}")
+    if args.resolve:
+        resolved = resolver.resolve_anomalies(enabled_rules)
+        write_rules_to_csv(args.output, resolved, headers, delim)
+        print(f"Saved resolved rules to: {args.output}")
