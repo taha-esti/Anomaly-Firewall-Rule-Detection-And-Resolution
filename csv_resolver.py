@@ -414,28 +414,39 @@ class AnomalyResolver:
         return f"{name}: <SZ:{zones[0]} DZ:{zones[1]} SRC:{src} SP:{sp} DST:{dst} DP:{dp} APP:{apps} ACT:{rule.actions}>"
 
     def detect_anomalies(self, rules_list: List[Rule]):
+        anomalies = self.find_anomalies(rules_list)
         self.resolver_logger.info("Perform Detection (pairwise anomalies only)")
+        for anomaly_type, rule_0, rule_1 in anomalies:
+            self.resolver_logger.info(
+                "%s\n\t%s\n\t%s", anomaly_type, self._fmt_rule(rule_0), self._fmt_rule(rule_1)
+            )
+        return anomalies
 
+    def find_anomalies(self, rules_list: List[Rule]):
+        """
+        Returns a list of (anomaly_type, rule_a, rule_b) for all overlapping pairs.
+        anomaly_type is one of: 'Redundancy Anomaly', 'Shadowing Anomaly', 'Correlation Anomaly'.
+        """
+        anomalies = []
         for rule_0, rule_1 in itertools.combinations(rules_list, 2):
             if rule_0.disjoint(rule_1):
                 continue
 
             if rule_0.issubset(rule_1) or rule_1.issubset(rule_0):
                 if rule_0.actions == rule_1.actions:
-                    self.resolver_logger.info(
-                        "Redundancy Anomaly\n\t%s\n\t%s", self._fmt_rule(rule_0), self._fmt_rule(rule_1)
-                    )
+                    anomalies.append(("Redundancy Anomaly", rule_0, rule_1))
                 else:
-                    self.resolver_logger.info(
-                        "Shadowing Anomaly\n\t%s\n\t%s", self._fmt_rule(rule_0), self._fmt_rule(rule_1)
-                    )
+                    anomalies.append(("Shadowing Anomaly", rule_0, rule_1))
                 continue
 
-            if (not rule_0.disjoint(rule_1)) and (not rule_0.issubset(rule_1)) and (not rule_1.issubset(rule_0)) and (rule_0.actions != rule_1.actions):
-                self.resolver_logger.info(
-                    "Correlation Anomaly\n\t%s\n\t%s", self._fmt_rule(rule_0), self._fmt_rule(rule_1)
-                )
+            if (
+                (not rule_0.issubset(rule_1))
+                and (not rule_1.issubset(rule_0))
+                and (rule_0.actions != rule_1.actions)
+            ):
+                anomalies.append(("Correlation Anomaly", rule_0, rule_1))
                 continue
+        return anomalies
 
     def resolve_anomalies(self, old_rules_list: List[Rule]) -> List[Rule]:
         """
@@ -536,6 +547,70 @@ def write_rules_to_csv(path: str, rules: List[Rule], headers: List[str], delimit
         for r in rules:
             w.writerow(r.raw)
 
+def write_anomalies_to_csv(path: str, anomalies, delimiter: str = ","):
+    """
+    Writes anomaly pairs to a CSV for review.
+    """
+    headers = [
+        "Anomaly Type",
+        "Rule A Name",
+        "Rule A Action",
+        "Rule A Source Zones",
+        "Rule A Destination Zones",
+        "Rule A Source Networks",
+        "Rule A Source Ports",
+        "Rule A Destination Networks",
+        "Rule A Destination Ports",
+        "Rule A Application filters",
+        "Rule B Name",
+        "Rule B Action",
+        "Rule B Source Zones",
+        "Rule B Destination Zones",
+        "Rule B Source Networks",
+        "Rule B Source Ports",
+        "Rule B Destination Networks",
+        "Rule B Destination Ports",
+        "Rule B Application filters",
+    ]
+
+    def _cell(rule: Rule, *keys: str) -> str:
+        for k in keys:
+            v = rule.raw.get(k)
+            if v is None:
+                continue
+            s = str(v).strip()
+            if s:
+                return s
+        return ""
+
+    with open(path, "w", encoding="utf-8", newline="") as f:
+        w = csv.writer(f, delimiter=delimiter)
+        w.writerow(headers)
+        for anomaly_type, a, b in anomalies:
+            w.writerow(
+                [
+                    anomaly_type,
+                    a.name,
+                    a.actions,
+                    _cell(a, "Source Zones"),
+                    _cell(a, "Destination Zones"),
+                    _cell(a, "Source Networks_translated", "Source Networks"),
+                    _cell(a, "Source Ports_translated", "Source Ports"),
+                    _cell(a, "Destination Networks_translated", "Destination Networks"),
+                    _cell(a, "Destination Ports_translated", "Destination Ports"),
+                    _cell(a, "Application filters"),
+                    b.name,
+                    b.actions,
+                    _cell(b, "Source Zones"),
+                    _cell(b, "Destination Zones"),
+                    _cell(b, "Source Networks_translated", "Source Networks"),
+                    _cell(b, "Source Ports_translated", "Source Ports"),
+                    _cell(b, "Destination Networks_translated", "Destination Networks"),
+                    _cell(b, "Destination Ports_translated", "Destination Ports"),
+                    _cell(b, "Application filters"),
+                ]
+            )
+
 
 # -------------------------
 # Example CLI usage
@@ -559,6 +634,7 @@ if __name__ == "__main__":
         help="Remove redundant rules and write an output file.",
     )
     p.add_argument("--output", default="resolved_rules.csv", help="Output file path (used with --resolve).")
+    p.add_argument("--report", help="Write detected anomaly pairs to this CSV path.")
     args = p.parse_args()
 
     rules, headers, delim = load_rules_from_csv(args.input_csv)
@@ -568,7 +644,10 @@ if __name__ == "__main__":
     # Optional: only analyze enabled rules
     enabled_rules = [r for r in rules if r.enabled is not False]
 
-    resolver.detect_anomalies(enabled_rules)
+    anomalies = resolver.detect_anomalies(enabled_rules)
+    if args.report:
+        write_anomalies_to_csv(args.report, anomalies, delimiter=",")
+        print(f"Saved anomaly report to: {args.report}")
     if args.resolve:
         resolved = resolver.resolve_anomalies(enabled_rules)
         write_rules_to_csv(args.output, resolved, headers, delim)
