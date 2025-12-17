@@ -6,6 +6,13 @@ import re
 from dataclasses import dataclass, field
 from typing import List, Tuple, Union, Optional
 
+"""CSV/TSV-based firewall rule anomaly detector and resolver adapted to your FMC export format.
+Usage:
+  python csv_resolver.py input_rules.csv --detect-only
+  python csv_resolver.py input_rules.csv --resolve --output resolved_rules.csv
+  python csv_resolver.py input_rules.csv --detect-only --report anomalies_report.csv
+"""
+
 
 # -------------------------
 # Parsing helpers
